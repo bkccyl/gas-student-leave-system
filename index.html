@@ -34,8 +34,6 @@
     .btn-action { background-color: #3498db; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; height: auto;}
     
     .status-msg { font-size: 14px; margin-top: 5px; font-weight: bold; min-height: 20px;}
-    
-    /* 列印選項區 */
     .print-options { background-color: #fff; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 15px; border: 2px dashed #95a5a6; }
     .print-options label { display: inline-block; margin-right: 20px; font-size: 16px; cursor: pointer; color: #2c3e50;}
   </style>
@@ -45,13 +43,17 @@
   <h2>📄 多梯次學生公假單系統</h2>
 
   <div class="global-section">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+      <span style="font-weight:bold; color:green;">✔️ 系統已啟用自動存檔</span>
+      <button class="btn-del-batch" style="background-color: #7f8c8d;" onclick="clearAllData()">🗑️ 清空所有資料</button>
+    </div>
     <div class="form-group">
-      <label>公假事由(詳述)：</label>
-      <input type="text" id="reason" value="">
+      <label>共用事由(詳述)：</label>
+      <input type="text" id="reason" value="115學年度全國中等學校撞球錦標賽" oninput="saveState()">
     </div>
     <div class="form-group" style="margin-bottom: 0;">
-      <label>公假地點：</label>
-      <input type="text" id="location" value="">
+      <label>共用地點：</label>
+      <input type="text" id="location" value="林口九號颱風競技館" oninput="saveState()">
     </div>
   </div>
 
@@ -72,8 +74,38 @@
     let batches = [];
     let batchCounter = 0;
 
+    // --- 自動存檔模組 ---
+    function saveState() {
+      const state = {
+        reason: document.getElementById('reason').value,
+        location: document.getElementById('location').value,
+        batches: batches,
+        batchCounter: batchCounter
+      };
+      localStorage.setItem('leaveSystemState', JSON.stringify(state));
+    }
+
+    function clearAllData() {
+      if(confirm('確定要清空所有梯次與學生資料嗎？（重新開始）')) {
+        localStorage.removeItem('leaveSystemState');
+        location.reload();
+      }
+    }
+
     window.onload = function() {
-      addBatch(); 
+      const savedState = localStorage.getItem('leaveSystemState');
+      if (savedState) {
+        const state = JSON.parse(savedState);
+        document.getElementById('reason').value = state.reason || '';
+        document.getElementById('location').value = state.location || '';
+        batches = state.batches || [];
+        batchCounter = state.batchCounter || 0;
+        
+        if (batches.length === 0) addBatch();
+        else renderBatches();
+      } else {
+        addBatch(); 
+      }
     };
 
     function addBatch() {
@@ -88,6 +120,7 @@
         students: []
       });
       renderBatches();
+      saveState();
     }
 
     function removeBatch(id) {
@@ -97,14 +130,17 @@
       }
       batches = batches.filter(b => b.id !== id);
       renderBatches();
+      saveState();
     }
 
     function updateBatchData(id, field, value) {
       const batch = batches.find(b => b.id === id);
-      if(batch) batch[field] = value;
+      if(batch) {
+        batch[field] = value;
+        saveState();
+      }
     }
 
-    // 解析從 Excel 貼上的資料，並加入排序功能
     function processPaste(batchId) {
       const textarea = document.getElementById(`pasteInput_${batchId}`);
       const msgEl = document.getElementById(`msg_${batchId}`);
@@ -124,7 +160,7 @@
         const parts = line.trim().split(/\s+/);
         if (parts.length >= 3) {
           const classNum = parts[0];
-          const seatNum = parseInt(parts[1], 10).toString(); // 去除座號補零
+          const seatNum = parseInt(parts[1], 10).toString();
           const name = parts[2];
 
           const exists = batch.students.some(s => s.classNum === classNum && s.seatNum === seatNum);
@@ -135,7 +171,6 @@
         }
       });
 
-      // 🔥 加入自動排序邏輯 (依班級 -> 座號)
       batch.students.sort((a, b) => {
         const classDiff = a.classNum.localeCompare(b.classNum, 'zh-Hant', { numeric: true });
         if (classDiff !== 0) return classDiff;
@@ -144,6 +179,7 @@
 
       textarea.value = '';
       renderBatches(); 
+      saveState();
       
       const newMsgEl = document.getElementById(`msg_${batchId}`);
       newMsgEl.style.color = 'green';
@@ -155,6 +191,7 @@
       if(batch) {
         batch.students.splice(studentIndex, 1);
         renderBatches();
+        saveState();
       }
     }
 
@@ -209,9 +246,7 @@
       wrapper.innerHTML = html;
     }
 
-   // --- 列印模組 ---
-
-    // 輔助函式：將西元日期 (YYYY-MM-DD) 轉換為民國格式 (YYY年MM月DD日)
+    // --- 列印模組 ---
     function formatROCDate(dateStr) {
       if (!dateStr) return '';
       const parts = dateStr.split('-');
@@ -220,7 +255,6 @@
       return `${rocYear}年${parts[1]}月${parts[2]}日`;
     }
 
-    // 輔助函式：只擷取月日 (MM月DD日)
     function formatMonthDay(dateStr) {
       if (!dateStr) return '';
       const parts = dateStr.split('-');
@@ -228,18 +262,14 @@
       return `${parts[1]}月${parts[2]}日`;
     }
     
-    // 獨立出單頁 HTML 生成函數，方便分組呼叫
     function buildPageHtml(batch, groupStudents, reason, location) {
       const isSameDay = batch.startDate === batch.endDate;
-      
-      // 1. 表頭的公假日期 (跨日期的結束日期只顯示月日)
       const startRoc = formatROCDate(batch.startDate);
       const endMonthDay = formatMonthDay(batch.endDate);
       const dateRangeStr = isSameDay 
         ? `${startRoc} &nbsp;&nbsp; ${batch.startTime} 至 ${batch.endTime}`
         : `${startRoc} 至 ${endMonthDay} &nbsp;&nbsp; ${batch.startTime} 至 ${batch.endTime}`;
       
-      // 2. 表格內的短日期 (MM/DD 格式)
       const shortStart = batch.startDate.substring(5).replace('-', '/');
       const shortEnd = batch.endDate.substring(5).replace('-', '/');
       const tableDateStr = isSameDay ? shortStart : `${shortStart}~${shortEnd}`;
@@ -274,7 +304,6 @@
         html += `<tr><td>${st.classNum}</td><td>${st.seatNum}</td><td>${st.name}</td><td></td><td>${tableDateStr}</td></tr>`;
       });
 
-      // 補足空白列 (至少10列)
       const minRows = 10;
       for (let j = groupStudents.length; j < minRows; j++) {
         html += `<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>`;
@@ -340,13 +369,11 @@
         if(b.students.length === 0) return;
 
         if (printMode === 'student') {
-          // 模式：一人一張
           b.students.forEach(st => {
             printHtml += buildPageHtml(b, [st], reason, location);
           });
         } 
         else if (printMode === 'class') {
-          // 模式：一個班級一張 (因為已排序，直接依序比對班級即可)
           let currentClass = b.students[0].classNum;
           let group = [];
           
@@ -361,7 +388,6 @@
           if (group.length > 0) printHtml += buildPageHtml(b, group, reason, location);
         } 
         else if (printMode === 'grade') {
-          // 模式：一個年級一張 (取班級前幾碼作為年級判斷，自動去除末兩碼)
           let currentGrade = b.students[0].classNum.slice(0, -2);
           let group = [];
 
