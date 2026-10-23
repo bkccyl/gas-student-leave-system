@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: "微軟正黑體", sans-serif; padding: 20px; max-width: 950px; margin: 0 auto; color: #333; background-color: #f9f9f9;}
+    h2 { text-align: center; color: #2c3e50; }
+    
+    .global-section { background-color: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #34495e;}
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; color: #34495e; font-size: 14px;}
+    input[type="text"], input[type="date"], input[type="time"] { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; font-size: 15px; }
+    
+    .batch-card { background-color: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-top: 4px solid #3498db; }
+    .batch-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px;}
+    .batch-header h3 { margin: 0; color: #2980b9; }
+    .datetime-row { display: flex; gap: 10px; margin-bottom: 15px; }
+    .datetime-row > div { flex: 1; }
+    
+    .search-area { background-color: #f4f6f7; padding: 15px; border-radius: 6px; margin-bottom: 15px; }
+    .search-input-wrap { display: flex; gap: 10px; }
+    .search-input-wrap textarea { flex-grow: 1; border: 2px solid #bdc3c7; padding: 10px; resize: vertical; }
+    .search-input-wrap textarea:focus { border-color: #3498db; outline: none; }
+    
+    .list-area { border: 1px solid #e0e0e0; padding: 15px; border-radius: 6px; background-color: #fafafa; }
+    .selected-item { display: inline-block; background-color: #e8f4f8; border: 1px solid #b3e5fc; padding: 8px 12px; margin: 5px; border-radius: 20px; font-size: 15px; }
+    .btn-remove { cursor: pointer; color: #e74c3c; margin-left: 5px; font-weight: bold; border: none; background: none; }
+    
+    .btn { background-color: #27ae60; color: white; padding: 12px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%;}
+    .btn:hover { background-color: #2ecc71; }
+    .btn-add-batch { background-color: #f39c12; margin-bottom: 20px; }
+    .btn-add-batch:hover { background-color: #f1c40f; }
+    .btn-del-batch { background-color: #e74c3c; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+    .btn-action { background-color: #3498db; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; height: auto;}
+    
+    .status-msg { font-size: 14px; margin-top: 5px; font-weight: bold; min-height: 20px;}
+    
+    /* 列印選項區 */
+    .print-options { background-color: #fff; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 15px; border: 2px dashed #95a5a6; }
+    .print-options label { display: inline-block; margin-right: 20px; font-size: 16px; cursor: pointer; color: #2c3e50;}
+  </style>
+</head>
+<body>
+
+  <h2>📄 多梯次學生公假單系統</h2>
+
+  <div class="global-section">
+    <div class="form-group">
+      <label>公假事由(詳述)：</label>
+      <input type="text" id="reason" value="">
+    </div>
+    <div class="form-group" style="margin-bottom: 0;">
+      <label>公假地點：</label>
+      <input type="text" id="location" value="">
+    </div>
+  </div>
+
+  <div id="batchesWrapper"></div>
+  <button class="btn btn-add-batch" onclick="addBatch()">➕ 新增另一個公假梯次</button>
+
+  <div class="print-options">
+    <span style="font-weight: bold; color: #e67e22; margin-right: 15px;">🖨️ 輸出分頁方式：</span>
+    <label><input type="radio" name="printMode" value="student"> 一人一張</label>
+    <label><input type="radio" name="printMode" value="class" checked> 一個班級一張</label>
+    <label><input type="radio" name="printMode" value="grade"> 一個年級一張</label>
+  </div>
+
+  <button class="btn" onclick="generatePdf()">🚀 產生並列印 PDF 公假單</button>
+  <div id="result" style="text-align: center; margin-top: 15px; font-weight: bold;"></div>
+
+  <script>
+    let batches = [];
+    let batchCounter = 0;
+
+    window.onload = function() {
+      addBatch(); 
+    };
+
+    function addBatch() {
+      batchCounter++;
+      const today = new Date().toISOString().split('T')[0];
+      batches.push({
+        id: batchCounter,
+        startDate: today,
+        endDate: today,
+        startTime: '07:30',
+        endTime: '16:00',
+        students: []
+      });
+      renderBatches();
+    }
+
+    function removeBatch(id) {
+      if(batches.length === 1) {
+        alert("必須至少保留一個梯次！");
+        return;
+      }
+      batches = batches.filter(b => b.id !== id);
+      renderBatches();
+    }
+
+    function updateBatchData(id, field, value) {
+      const batch = batches.find(b => b.id === id);
+      if(batch) batch[field] = value;
+    }
+
+    // 解析從 Excel 貼上的資料，並加入排序功能
+    function processPaste(batchId) {
+      const textarea = document.getElementById(`pasteInput_${batchId}`);
+      const msgEl = document.getElementById(`msg_${batchId}`);
+      const text = textarea.value.trim();
+
+      if (!text) {
+        msgEl.style.color = 'red';
+        msgEl.innerText = "⚠️ 請先貼上 Excel 資料。";
+        return;
+      }
+
+      const lines = text.split('\n');
+      const batch = batches.find(b => b.id === batchId);
+      let addedCount = 0;
+
+      lines.forEach(line => {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 3) {
+          const classNum = parts[0];
+          const seatNum = parseInt(parts[1], 10).toString(); // 去除座號補零
+          const name = parts[2];
+
+          const exists = batch.students.some(s => s.classNum === classNum && s.seatNum === seatNum);
+          if (!exists) {
+            batch.students.push({ classNum, seatNum, name });
+            addedCount++;
+          }
+        }
+      });
+
+      // 🔥 加入自動排序邏輯 (依班級 -> 座號)
+      batch.students.sort((a, b) => {
+        const classDiff = a.classNum.localeCompare(b.classNum, 'zh-Hant', { numeric: true });
+        if (classDiff !== 0) return classDiff;
+        return parseInt(a.seatNum, 10) - parseInt(b.seatNum, 10);
+      });
+
+      textarea.value = '';
+      renderBatches(); 
+      
+      const newMsgEl = document.getElementById(`msg_${batchId}`);
+      newMsgEl.style.color = 'green';
+      newMsgEl.innerText = `✔️ 成功加入並排序 ${addedCount} 筆資料 (自動略過重複者)。`;
+    }
+
+    function removeStudent(batchId, studentIndex) {
+      const batch = batches.find(b => b.id === batchId);
+      if(batch) {
+        batch.students.splice(studentIndex, 1);
+        renderBatches();
+      }
+    }
+
+    function renderBatches() {
+      const wrapper = document.getElementById('batchesWrapper');
+      let html = '';
+
+      batches.forEach((b, index) => {
+        let studentsHtml = '';
+        if (b.students.length === 0) {
+          studentsHtml = '<span style="color:#999;">此梯次目前無人，請在上方貼上加入。</span>';
+        } else {
+          b.students.forEach((st, sIdx) => {
+            studentsHtml += `
+              <div class="selected-item">
+                ${st.classNum}班 ${st.seatNum}號 <strong>${st.name}</strong>
+                <button class="btn-remove" onclick="removeStudent(${b.id}, ${sIdx})" title="移除">❌</button>
+              </div>`;
+          });
+        }
+
+        html += `
+          <div class="batch-card" id="batch_${b.id}">
+            <div class="batch-header">
+              <h3>🏷️ 梯次 ${index + 1}</h3>
+              <button class="btn-del-batch" onclick="removeBatch(${b.id})">🗑️ 刪除此梯次</button>
+            </div>
+            
+            <div class="datetime-row">
+              <div><label>公假日期 (起)：</label><input type="date" value="${b.startDate}" onchange="updateBatchData(${b.id}, 'startDate', this.value)"></div>
+              <div><label>公假日期 (迄)：</label><input type="date" value="${b.endDate}" onchange="updateBatchData(${b.id}, 'endDate', this.value)"></div>
+              <div><label>請假時間 (起)：</label><input type="time" value="${b.startTime}" onchange="updateBatchData(${b.id}, 'startTime', this.value)"></div>
+              <div><label>請假時間 (迄)：</label><input type="time" value="${b.endTime}" onchange="updateBatchData(${b.id}, 'endTime', this.value)"></div>
+            </div>
+
+            <div class="search-area">
+              <label>📋 批次加入學生 (請從 Excel 複製「班級、座號、姓名」後貼上)</label>
+              <div class="search-input-wrap">
+                <textarea id="pasteInput_${b.id}" rows="4" placeholder="例如：\n101  1  王大明\n101  2  陳小華"></textarea>
+                <button class="btn-action" onclick="processPaste(${b.id})">解析並加入</button>
+              </div>
+              <div id="msg_${b.id}" class="status-msg"></div>
+            </div>
+
+            <div class="list-area">
+              <div style="font-weight:bold; margin-bottom:8px; color:#e67e22;">📋 本梯次公假人員 (共 ${b.students.length} 人)</div>
+              ${studentsHtml}
+            </div>
+          </div>
+        `;
+      });
+      wrapper.innerHTML = html;
+    }
+
+   // --- 列印模組 ---
+
+    // 輔助函式：將西元日期 (YYYY-MM-DD) 轉換為民國格式 (YYY年MM月DD日)
+    function formatROCDate(dateStr) {
+      if (!dateStr) return '';
+      const parts = dateStr.split('-');
+      if (parts.length !== 3) return dateStr;
+      const rocYear = parseInt(parts[0], 10) - 1911;
+      return `${rocYear}年${parts[1]}月${parts[2]}日`;
+    }
+
+    // 輔助函式：只擷取月日 (MM月DD日)
+    function formatMonthDay(dateStr) {
+      if (!dateStr) return '';
+      const parts = dateStr.split('-');
+      if (parts.length !== 3) return dateStr;
+      return `${parts[1]}月${parts[2]}日`;
+    }
+    
+    // 獨立出單頁 HTML 生成函數，方便分組呼叫
+    function buildPageHtml(batch, groupStudents, reason, location) {
+      const isSameDay = batch.startDate === batch.endDate;
+      
+      // 1. 表頭的公假日期 (跨日期的結束日期只顯示月日)
+      const startRoc = formatROCDate(batch.startDate);
+      const endMonthDay = formatMonthDay(batch.endDate);
+      const dateRangeStr = isSameDay 
+        ? `${startRoc} &nbsp;&nbsp; ${batch.startTime} 至 ${batch.endTime}`
+        : `${startRoc} 至 ${endMonthDay} &nbsp;&nbsp; ${batch.startTime} 至 ${batch.endTime}`;
+      
+      // 2. 表格內的短日期 (MM/DD 格式)
+      const shortStart = batch.startDate.substring(5).replace('-', '/');
+      const shortEnd = batch.endDate.substring(5).replace('-', '/');
+      const tableDateStr = isSameDay ? shortStart : `${shortStart}~${shortEnd}`;
+
+      let html = `
+        <div class="page-break">
+          <div class="header-title">新北市立丹鳳高級中學學生公假申請單</div>
+          <div class="info-section">
+            <div>事由(詳述)：${reason}</div>
+            <div>地點：${location}</div>
+            <div>公假日期：${dateRangeStr}</div>
+            <div>證明文件：<span class="checkbox"></span>公文 <span class="checkbox" style="margin-left:15px;"></span>其他：</div>
+          </div>
+          <div class="flow-text">申請流程：1取單 > 2導師及指導尊師簽名 > 3至衛生組午餐秘書停餐 > 4生教組</div>
+          <div style="margin-bottom: 5px; font-size: 16px;">
+            參加人員：(下列人員) <span class="warning-text">【請事前完成公假流程】</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 15%;">班級</th>
+                <th style="width: 15%;">座號</th>
+                <th style="width: 25%;">姓名</th>
+                <th style="width: 25%;">2導師簽名</th>
+                <th style="width: 20%;">公假日期</th>
+              </tr>
+            </thead>
+            <tbody>
+      `;
+
+      groupStudents.forEach(st => {
+        html += `<tr><td>${st.classNum}</td><td>${st.seatNum}</td><td>${st.name}</td><td></td><td>${tableDateStr}</td></tr>`;
+      });
+
+      // 補足空白列 (至少10列)
+      const minRows = 10;
+      for (let j = groupStudents.length; j < minRows; j++) {
+        html += `<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>`;
+      }
+
+      html += `
+            </tbody>
+          </table>
+          <div class="footer-section">
+            <div style="display: flex; justify-content: space-between;">
+              <span>2申請人／指導老師：</span>
+              <span><span class="checkbox"></span> 需停餐(請加會午餐秘書)：</span>
+            </div>
+            <div class="signature-row">
+              <div class="signature-cell">生教組長</div>
+              <div class="signature-cell">主任教官</div>
+              <div class="signature-cell">學務主任</div>
+              <div class="signature-cell">校長</div>
+            </div>
+          </div>
+        </div>
+      `;
+      return html;
+    }
+
+    function generatePdf() {
+      const reason = document.getElementById('reason').value || '';
+      const location = document.getElementById('location').value || '';
+      const printMode = document.querySelector('input[name="printMode"]:checked').value;
+      
+      const hasStudents = batches.some(b => b.students.length > 0);
+      if(!hasStudents) {
+        alert("⚠️ 請至少在一個梯次中加入學生！");
+        return;
+      }
+
+      let printWindow = window.open('', '_blank');
+      let printHtml = `
+        <html>
+        <head>
+          <title>匯出公假單</title>
+          <style>
+            @page { size: A4 portrait; margin: 15mm 20mm; }
+            body { font-family: 'Times New Roman', 'DFKai-sb', 'BiauKai', '標楷體', serif; color: #000; margin: 0; background: #fff; padding: 0;}
+            .page-break { page-break-after: always; padding-top: 20px;}
+            .page-break:last-child { page-break-after: auto; }
+            .header-title { text-align: center; font-size: 24px; letter-spacing: 2px; margin-bottom: 25px; }
+            .info-section { line-height: 1.8; font-size: 16px; margin-bottom: 10px; }
+            .checkbox { display: inline-block; width: 14px; height: 14px; border: 1px solid #000; vertical-align: middle; margin-right: 5px; }
+            .flow-text { font-size: 13px; margin-bottom: 15px; }
+            .warning-text { float: right; font-weight: bold; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+            th, td { border: 1px solid #000; padding: 8px; text-align: center; font-size: 16px; height: 35px; }
+            .footer-section { margin-top: 30px; font-size: 16px;}
+            .signature-row { display: table; width: 100%; margin-top: 50px; }
+            .signature-cell { display: table-cell; text-align: center; width: 25%; }
+          </style>
+        </head>
+        <body>
+      `;
+
+      batches.forEach(b => {
+        if(b.students.length === 0) return;
+
+        if (printMode === 'student') {
+          // 模式：一人一張
+          b.students.forEach(st => {
+            printHtml += buildPageHtml(b, [st], reason, location);
+          });
+        } 
+        else if (printMode === 'class') {
+          // 模式：一個班級一張 (因為已排序，直接依序比對班級即可)
+          let currentClass = b.students[0].classNum;
+          let group = [];
+          
+          b.students.forEach(st => {
+            if (st.classNum !== currentClass) {
+              printHtml += buildPageHtml(b, group, reason, location);
+              currentClass = st.classNum;
+              group = [];
+            }
+            group.push(st);
+          });
+          if (group.length > 0) printHtml += buildPageHtml(b, group, reason, location);
+        } 
+        else if (printMode === 'grade') {
+          // 模式：一個年級一張 (取班級前幾碼作為年級判斷，自動去除末兩碼)
+          let currentGrade = b.students[0].classNum.slice(0, -2);
+          let group = [];
+
+          b.students.forEach(st => {
+            let grade = st.classNum.slice(0, -2);
+            if (grade !== currentGrade) {
+              printHtml += buildPageHtml(b, group, reason, location);
+              currentGrade = grade;
+              group = [];
+            }
+            group.push(st);
+          });
+          if (group.length > 0) printHtml += buildPageHtml(b, group, reason, location);
+        }
+      });
+
+      printHtml += `</body></html>`;
+      printWindow.document.write(printHtml);
+      printWindow.document.close();
+      
+      document.getElementById('result').innerHTML = "✅ 列印視窗已開啟！";
+      setTimeout(() => { printWindow.print(); }, 500);
+    }
+  </script>
+</body>
+</html>
